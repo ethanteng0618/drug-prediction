@@ -70,11 +70,9 @@ html, body, [class*="css"] {
 # ─── Data Helpers ─────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data_and_features():
-    dataset = pd.read_csv("input/combined_DepMap_21Q3.csv")
-    X = dataset.iloc[:, 1:17652]
-    vt = VarianceThreshold(threshold=0.0)
-    vt.fit(X)
-    return X.columns[vt.get_support()]
+    with open("features.txt", "r") as f:
+        features = [line.strip() for line in f.readlines()]
+    return features
 
 @st.cache_data(show_spinner=False)
 def load_metadata():
