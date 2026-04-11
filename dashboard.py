@@ -136,37 +136,39 @@ def load_metadata():
         return pd.DataFrame()
 
 @st.cache_resource(show_spinner=False)
-def load_model(drug_name):
-    return joblib.load(f"output/LightGBM_{drug_name}_leakproof.joblib")
+def load_model(drug_name, struct="Original"):
+    if struct == "Original":
+        return joblib.load(f"output/models/LightGBM_{drug_name}_leakproof.joblib")
+    else:
+        return joblib.load(f"output/models/LightGBM_SVD_{drug_name}_leakproof.joblib")
 
-def get_available_drugs():
-    files = glob.glob("output/LightGBM_*_leakproof.joblib")
-    drugs = []
-    for f in files:
-        fname = os.path.basename(f)
-        drugs.append(fname.replace("LightGBM_", "").replace("_leakproof.joblib", ""))
+def get_available_drugs(struct="Original"):
+    if struct == "Original":
+        files = glob.glob("output/models/LightGBM_*_leakproof.joblib")
+        drugs = [os.path.basename(f).replace("LightGBM_", "").replace("_leakproof.joblib", "") for f in files if "SVD" not in os.path.basename(f)]
+    else:
+        files = glob.glob("output/models/LightGBM_SVD_*_leakproof.joblib")
+        drugs = [os.path.basename(f).replace("LightGBM_SVD_", "").replace("_leakproof.joblib", "") for f in files]
     return sorted(drugs)
 
-def load_cv_results():
+def load_cv_results(struct="Original"):
     results = []
-    for f in glob.glob("output/cv_results_*_LGBM.csv"):
-        fname = os.path.basename(f)
-        drug = fname.replace("cv_results_", "").replace("_LGBM.csv", "")
-        df = pd.read_csv(f)
-        if 'test_accuracy' in df.columns:
-            results.append({
-                "Drug": drug,
-                "Accuracy": round(df['test_accuracy'].mean(), 4),
-                "Precision": round(df['test_precision'].mean(), 4),
-                "Recall": round(df['test_recall'].mean(), 4),
-                "F1": round(df['test_f1'].mean(), 4),
-            })
+    if struct == "Original":
+        files = glob.glob("output/cv_results/cv_results_*_LGBM.csv")
+        files = [f for f in files if "SVD" not in os.path.basename(f)]
+        for f in files:
+            drug = os.path.basename(f).replace("cv_results_", "").replace("_LGBM.csv", "")
+            df = pd.read_csv(f)
+            if 'test_accuracy' in df.columns:
+                results.append({"Drug": drug, "Accuracy": round(df['test_accuracy'].mean(), 4), "Precision": round(df['test_precision'].mean(), 4), "Recall": round(df['test_recall'].mean(), 4), "F1": round(df['test_f1'].mean(), 4)})
+    else:
+        files = glob.glob("output/cv_results/cv_results_SVD_*_LGBM.csv")
+        for f in files:
+            drug = os.path.basename(f).replace("cv_results_SVD_", "").replace("_LGBM.csv", "")
+            df = pd.read_csv(f)
+            if 'test_accuracy' in df.columns:
+                results.append({"Drug": drug, "Accuracy": round(df['test_accuracy'].mean(), 4), "Precision": round(df['test_precision'].mean(), 4), "Recall": round(df['test_recall'].mean(), 4), "F1": round(df['test_f1'].mean(), 4)})
     return results
-
-available_drugs = get_available_drugs()
-if not available_drugs:
-    st.error("No trained models found in output/.")
-    st.stop()
 
 metadata_df = load_metadata()
 
@@ -174,9 +176,19 @@ metadata_df = load_metadata()
 with st.sidebar:
     st.markdown("###  Drug Prediction")
     st.markdown("---")
-    page = st.radio("", ["Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
+    str_choice = st.radio("Model Architecture", ["Original (Raw Genes)", "SVD Extrapolated"])
+    ms_key = "Original" if "Original" in str_choice else "SVD"
     st.markdown("---")
-    st.markdown(f'<div class="sb-label">Models trained</div><div class="sb-val">{len(available_drugs)}</div><div class="sb-sub">LightGBM · Leak-proof</div>', unsafe_allow_html=True)
+    page = st.radio("Analysis", ["Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
+    st.markdown("---")
+    
+    available_drugs = get_available_drugs(ms_key)
+    
+    if not available_drugs:
+        st.error(f"No trained models found for {ms_key} Architecture.")
+        st.stop()
+        
+    st.markdown(f'<div class="sb-label">Models trained</div><div class="sb-val">{len(available_drugs)}</div><div class="sb-sub">{ms_key} LightGBM</div>', unsafe_allow_html=True)
 
 
 # ─── Page 1: Drug Response Drivers ───────────────────────────────────────────
@@ -227,12 +239,16 @@ if page == "Drug Response Drivers":
     with st.spinner("Loading features..."):
         surviving_features = load_data_and_features()
     with st.spinner("Loading model..."):
-        model = load_model(selected_drug)
+        model = load_model(selected_drug, ms_key)
 
-    importances = model.feature_importances_
+    if ms_key == "Original":
+        importances = model.feature_importances_
+    else:
+        svd_transformer = joblib.load(f"output/models/LightGBM_SVD_transformer_{selected_drug}.joblib")
+        importances = np.dot(model.feature_importances_, np.abs(svd_transformer.components_))
 
     if len(importances) != len(surviving_features):
-        st.error(f"Feature mismatch: model {len(importances)} vs VT {len(surviving_features)}.")
+        st.error(f"Feature mismatch: map shape {len(importances)} vs VT {len(surviving_features)}.")
     else:
         df_imp = pd.DataFrame({"Gene": surviving_features, "Importance": importances})
         df_top20 = df_imp.sort_values("Importance", ascending=False).head(20)
@@ -306,10 +322,10 @@ if page == "Drug Response Drivers":
 # ─── Page 2: Cross-Validation Analysis ───────────────────────────────────────
 elif page == "Cross-Validation Analysis":
     st.markdown('<div class="page-title">Cross-Validation Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Mean metrics from 5-fold stratified CV across all trained drug models</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="page-sub">Mean metrics from 5-fold stratified CV across all {ms_key} models</div>', unsafe_allow_html=True)
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-    results = load_cv_results()
+    results = load_cv_results(ms_key)
 
     if not results:
         st.warning("No CV results found. Run LightGBM_LeakProof.py on a drug first.")

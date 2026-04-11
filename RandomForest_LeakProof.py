@@ -45,8 +45,8 @@ def run_rf_corrected(drug):
     rfc.fit(X_train_resampled, y_train_resampled)
 
     # Save model
-    os.makedirs("output", exist_ok=True)
-    joblib.dump(rfc, f"output/RandomForest_{drug}_leakproof.joblib")
+    os.makedirs("output/models", exist_ok=True)
+    joblib.dump(rfc, f"output/models/RandomForest_{drug}_leakproof.joblib")
 
     # 6. Evaluate on the UNTOUCHED Test Data
     y_pred = rfc.predict(X_test_filtered)
@@ -55,7 +55,8 @@ def run_rf_corrected(drug):
     print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
     model_report = classification_report(y_test, y_pred, output_dict=True, labels=np.unique(y_pred))
-    pd.DataFrame(model_report).transpose().to_csv(f"output/classification_report_{drug}_leakproof.csv")
+    os.makedirs("output/reports", exist_ok=True)
+    pd.DataFrame(model_report).transpose().to_csv(f"output/reports/classification_report_{drug}_leakproof.csv")
 
     # 7. Cross-Validation (Safely built with an imblearn Pipeline)
     # This prevents data leakage across the 5 different testing folds
@@ -68,7 +69,8 @@ def run_rf_corrected(drug):
 
     kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=7)
     cv_results = cross_validate(pipeline, X, y, cv=kfold, scoring=['accuracy', 'precision', 'recall', 'f1'], n_jobs=-1)
-    pd.DataFrame(cv_results).to_csv(f"output/cv_results_{drug}_leakproof.csv")
+    os.makedirs("output/cv_results", exist_ok=True)
+    pd.DataFrame(cv_results).to_csv(f"output/cv_results/cv_results_{drug}_leakproof.csv")
 
     print("\nPipeline Complete. Results saved to /output")
 
