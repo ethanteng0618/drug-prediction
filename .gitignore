@@ -3,6 +3,10 @@ input/combined_DepMap_21Q3.csv
 input/combined_DepMap_21Q3_CCLE_expression.csv
 input/combined_DepMap_21Q3_druggable.csv
 
+# Ignore system files
+**/.DS_Store
+.DS_Store
+
 # Ignore python cache
 __pycache__/
 .venv/
