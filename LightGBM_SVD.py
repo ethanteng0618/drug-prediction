@@ -13,6 +13,21 @@ from sklearn.feature_selection import VarianceThreshold
 from sklearn.pipeline import Pipeline # Standard sklearn pipeline is safe now!
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import BaseEstimator, ClassifierMixin
+
+class ThresholdWrapper(BaseEstimator, ClassifierMixin):
+    def __init__(self, estimator, threshold=0.40):
+        self.estimator = estimator
+        self.threshold = threshold
+    def fit(self, X, y, **kwargs):
+        self.estimator.fit(X, y, **kwargs)
+        self.classes_ = self.estimator.classes_
+        return self
+    def predict(self, X):
+        probs = self.estimator.predict_proba(X)
+        return self.classes_[(probs[:, 1] >= self.threshold).astype(int)]
+    def predict_proba(self, X):
+        return self.estimator.predict_proba(X)
 
 # 1. Load Data
 print("Loading DepMap dataset...")
@@ -71,7 +86,7 @@ def run_lgbm(drug):
     joblib.dump(lgbm, f"output/models/LightGBM_SVD_{drug}_leakproof.joblib")
 
     # 5. Evaluate on the UNTOUCHED Test Data
-    y_pred = lgbm.predict(X_test_filtered)
+    y_pred = (lgbm.predict_proba(X_test_filtered)[:, 1] >= 0.40).astype(int)
 
     print("\n--- Model Evaluation ---")
     print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
@@ -86,7 +101,7 @@ def run_lgbm(drug):
         ('scaler', StandardScaler()),
         ('svd', TruncatedSVD(n_components=100, random_state=42)),
         ('vt', VarianceThreshold(threshold=0.0)),
-        ('lgbm', LGBMClassifier(n_estimators=150, class_weight='balanced', learning_rate=0.05, n_jobs=-1, random_state=7, verbose=-1))
+        ('lgbm', ThresholdWrapper(LGBMClassifier(n_estimators=150, class_weight='balanced', learning_rate=0.05, n_jobs=-1, random_state=7, verbose=-1), threshold=0.40))
     ])
 
     kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=7)
