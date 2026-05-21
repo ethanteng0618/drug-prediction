@@ -231,7 +231,7 @@ with st.sidebar:
     else:
         ms_key = "Multi_combined"
     st.markdown("---")
-    page = st.radio("Analysis", ["Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
+    page = st.radio("Analysis", ["Drug Database (Landing)", "Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
     st.markdown("---")
     
     available_drugs = get_available_drugs(ms_key)
@@ -243,8 +243,95 @@ with st.sidebar:
     st.markdown(f'<div class="sb-label">Models trained</div><div class="sb-val">{len(available_drugs)}</div><div class="sb-sub">{ms_key} LightGBM</div>', unsafe_allow_html=True)
 
 
-# ─── Page 1: Drug Response Drivers ───────────────────────────────────────────
-if page == "Drug Response Drivers":
+# ─── Page 1: Drug Database (Landing) ─────────────────────────────────────────
+if page == "Drug Database (Landing)":
+    st.markdown('<div class="page-title">Drug Database</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-sub">Comprehensive metadata catalog of all PRISM experimental targets</div>', unsafe_allow_html=True)
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
+    
+    with st.spinner("Compiling drug metadata matrix..."):
+        try:
+            with open("input/drug_list.txt", "r") as f:
+                all_targets = [line.strip() for line in f.readlines() if line.strip()]
+        except Exception:
+            all_targets = []
+            
+        trained_files = glob.glob("output/models/*.joblib")
+        trained_targets = set()
+        for tf in trained_files:
+            base = os.path.basename(tf)
+            for t in all_targets:
+                if t in base:
+                    trained_targets.add(t)
+                    break
+                    
+        table_data = []
+        for t in all_targets:
+            core_id = t.split("-")[0] + "-" + t.split("-")[1] if "-" in t else t
+            
+            name, moa, phase, ind, tag = "Unknown", "Unknown", "Unknown", "Unknown", ""
+            
+            if not metadata_df.empty and core_id in metadata_df.index:
+                info = metadata_df.loc[core_id]
+                if isinstance(info, pd.DataFrame):
+                    info = info.iloc[0]
+                name = info['name'] if pd.notnull(info['name']) else "Unknown"
+                moa = info['moa'] if pd.notnull(info['moa']) else "Unknown"
+                phase = info['phase'] if pd.notnull(info['phase']) else "Unknown"
+                ind = info['disease.area'] if pd.notnull(info['disease.area']) else "Unknown"
+                tag = info['tag'] if 'tag' in info and pd.notnull(info['tag']) else ""
+                
+            status = "🟢 Trained" if t in trained_targets else "⚪ Untrained"
+            
+            table_data.append({
+                "Target ID": t,
+                "Status": status,
+                "Name": str(name).title() if name != "Unknown" else name,
+                "MOA": str(moa).capitalize() if moa != "Unknown" else moa,
+                "Phase": str(phase),
+                "Disease Area": str(ind).title() if ind != "Unknown" else ind,
+                "Database Source": tag
+            })
+            
+        if table_data:
+            df_db = pd.DataFrame(table_data)
+            
+            # Stat metrics for landing page
+            trained_count = len(trained_targets)
+            total_count = len(all_targets)
+            matched_meta = df_db[df_db["Name"] != "Unknown"].shape[0]
+            
+            st.markdown(f"""
+            <div class="stat-row">
+                <div class="stat-card">
+                    <div class="slabel">Total Pipeline Targets</div>
+                    <div class="sval">{total_count:,}</div>
+                    <div class="ssub">Available for extraction</div>
+                </div>
+                <div class="stat-card">
+                    <div class="slabel">Trained Pipelines</div>
+                    <div class="sval">{trained_count:,}</div>
+                    <div class="ssub">Algorithmically fitted</div>
+                </div>
+                <div class="stat-card">
+                    <div class="slabel">Metadata Hits</div>
+                    <div class="sval">{matched_meta:,}</div>
+                    <div class="ssub">Cross-referenced to PRISM databases</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.dataframe(
+                df_db,
+                use_container_width=True,
+                height=600,
+                hide_index=True
+            )
+        else:
+            st.warning("⚠️ No targets found in input/drug_list.txt. Ensure the pipeline data source is connected.")
+
+# ─── Page 2: Drug Response Drivers ───────────────────────────────────────────
+elif page == "Drug Response Drivers":
     col_l, col_r = st.columns([3, 2])
     with col_l:
         st.markdown('<div class="page-title">Drug Response Drivers</div>', unsafe_allow_html=True)
