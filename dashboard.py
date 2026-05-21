@@ -222,7 +222,7 @@ with st.sidebar:
     if "nav_page" not in st.session_state:
         st.session_state.nav_page = "Drug Database (Landing)"
 
-    if st.button("💊 Drug Prediction Home", use_container_width=True, type="primary"):
+    if st.button("Drug Prediction", use_container_width=True):
         st.session_state.nav_page = "Drug Database (Landing)"
     st.markdown("---")
     str_choice = st.radio("Model Architecture", ["Original (Raw Genes)", "SVD Extrapolated", "Targeted (Top 200 Features)", "Multi-Omics (Combined)"])
