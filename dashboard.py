@@ -219,7 +219,11 @@ metadata_df = load_metadata()
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("###  Drug Prediction")
+    if "nav_page" not in st.session_state:
+        st.session_state.nav_page = "Drug Database (Landing)"
+
+    if st.button("💊 Drug Prediction Home", use_container_width=True, type="primary"):
+        st.session_state.nav_page = "Drug Database (Landing)"
     st.markdown("---")
     str_choice = st.radio("Model Architecture", ["Original (Raw Genes)", "SVD Extrapolated", "Targeted (Top 200 Features)", "Multi-Omics (Combined)"])
     if "Original" in str_choice:
@@ -231,7 +235,7 @@ with st.sidebar:
     else:
         ms_key = "Multi_combined"
     st.markdown("---")
-    page = st.radio("Analysis", ["Drug Database (Landing)", "Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
+    page = st.radio("Analysis", ["Drug Database (Landing)", "Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed", key="nav_page")
     st.markdown("---")
     
     available_drugs = get_available_drugs(ms_key)
@@ -320,6 +324,12 @@ if page == "Drug Database (Landing)":
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            st.markdown('<hr class="divider">', unsafe_allow_html=True)
+            view_filter = st.radio("Filter Database Matrix", ["All Targets", "Trained Models Only"], horizontal=True)
+            
+            if view_filter == "Trained Models Only":
+                df_db = df_db[df_db["Status"] == "🟢 Trained"]
 
             st.dataframe(
                 df_db,
