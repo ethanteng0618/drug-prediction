@@ -294,7 +294,8 @@ if page == "Drug Response Drivers":
         model = load_model(selected_drug, ms_key)
 
     if ms_key == "Original":
-        importances = model.feature_importances_
+        est = getattr(model, 'estimator', model)
+        importances = est.feature_importances_
         active_features = surviving_features
     elif ms_key == "Targeted":
         lgbm_est = model.named_steps["lgbm"].estimator
@@ -303,18 +304,21 @@ if page == "Drug Response Drivers":
         fs_mask = model.named_steps['feature_selector'].get_support()
         mapped_feats = np.array(surviving_features)
         
-        # vt_mask matches original surviving_features size? 
-        # Actually surviving_features is what dashboard originally read, maybe it was loaded from `features.txt` which doesn't reflect what model saw.
-        # Let's map it safely
         try:
             passed_vt = mapped_feats[vt_mask] if len(vt_mask) == len(mapped_feats) else mapped_feats[:len(vt_mask)][vt_mask]
             active_features = passed_vt[fs_mask]
         except Exception:
             active_features = [f"Gene_{i}" for i in range(len(importances))]
             
-    else:
+    elif ms_key == "Multi_combined":
+        lgbm_est = model.named_steps["lgbm"].estimator
+        importances = lgbm_est.feature_importances_
+        active_features = [f"MultiOmics_Component_{i}" for i in range(len(importances))]
+        
+    else: # SVD
+        est = getattr(model, 'estimator', model)
         svd_transformer = joblib.load(f"output/models/LightGBM_SVD_transformer_{selected_drug}.joblib")
-        importances = np.dot(model.feature_importances_, np.abs(svd_transformer.components_))
+        importances = np.dot(est.feature_importances_, np.abs(svd_transformer.components_))
         active_features = surviving_features
 
     if len(importances) != len(active_features):
