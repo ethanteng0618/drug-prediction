@@ -13,3 +13,7 @@ __pycache__/
 env/
 venv/
 *.pyc
+
+input/aligned/aligned_crispr.csv
+input/aligned/aligned_mutations.csv
+input/CCLE_mutations_bool_damaging.csv

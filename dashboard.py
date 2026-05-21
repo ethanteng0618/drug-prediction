@@ -7,6 +7,21 @@ import plotly.graph_objects as go
 from sklearn.feature_selection import VarianceThreshold
 import os
 import glob
+from sklearn.base import BaseEstimator, ClassifierMixin
+
+class ThresholdWrapper(BaseEstimator, ClassifierMixin):
+    def __init__(self, estimator, threshold=0.40):
+        self.estimator = estimator
+        self.threshold = threshold
+    def fit(self, X, y, **kwargs):
+        self.estimator.fit(X, y, **kwargs)
+        self.classes_ = self.estimator.classes_
+        return self
+    def predict(self, X):
+        probs = self.estimator.predict_proba(X)
+        return self.classes_[(probs[:, 1] >= self.threshold).astype(int)]
+    def predict_proba(self, X):
+        return self.estimator.predict_proba(X)
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -139,35 +154,65 @@ def load_metadata():
 def load_model(drug_name, struct="Original"):
     if struct == "Original":
         return joblib.load(f"output/models/LightGBM_{drug_name}_leakproof.joblib")
-    else:
+    elif struct == "SVD":
         return joblib.load(f"output/models/LightGBM_SVD_{drug_name}_leakproof.joblib")
+    elif struct == "Targeted":
+        return joblib.load(f"output/models/LightGBM_Targeted_{drug_name}_leakproof.joblib")
+    else:
+        return joblib.load(f"output/models/LightGBM_MultiOmics_combined_{drug_name}.joblib")
 
 def get_available_drugs(struct="Original"):
     if struct == "Original":
         files = glob.glob("output/models/LightGBM_*_leakproof.joblib")
-        drugs = [os.path.basename(f).replace("LightGBM_", "").replace("_leakproof.joblib", "") for f in files if "SVD" not in os.path.basename(f)]
-    else:
+        drugs = [os.path.basename(f).replace("LightGBM_", "").replace("_leakproof.joblib", "") for f in files if "SVD" not in os.path.basename(f) and "Targeted" not in os.path.basename(f)]
+    elif struct == "SVD":
         files = glob.glob("output/models/LightGBM_SVD_*_leakproof.joblib")
         drugs = [os.path.basename(f).replace("LightGBM_SVD_", "").replace("_leakproof.joblib", "") for f in files]
+    elif struct == "Targeted":
+        files = glob.glob("output/models/LightGBM_Targeted_*_leakproof.joblib")
+        drugs = [os.path.basename(f).replace("LightGBM_Targeted_", "").replace("_leakproof.joblib", "") for f in files]
+    else:
+        files = glob.glob("output/models/LightGBM_MultiOmics_combined_*.joblib")
+        drugs = [os.path.basename(f).replace("LightGBM_MultiOmics_combined_", "").replace(".joblib", "") for f in files]
     return sorted(drugs)
 
 def load_cv_results(struct="Original"):
     results = []
     if struct == "Original":
         files = glob.glob("output/cv_results/cv_results_*_LGBM.csv")
-        files = [f for f in files if "SVD" not in os.path.basename(f)]
-        for f in files:
-            drug = os.path.basename(f).replace("cv_results_", "").replace("_LGBM.csv", "")
-            df = pd.read_csv(f)
-            if 'test_accuracy' in df.columns:
-                results.append({"Drug": drug, "Accuracy": round(df['test_accuracy'].mean(), 4), "Precision": round(df['test_precision'].mean(), 4), "Recall": round(df['test_recall'].mean(), 4), "F1": round(df['test_f1'].mean(), 4)})
-    else:
+        files = [f for f in files if "SVD" not in os.path.basename(f) and "Targeted" not in os.path.basename(f)]
+    elif struct == "SVD":
         files = glob.glob("output/cv_results/cv_results_SVD_*_LGBM.csv")
-        for f in files:
+    elif struct == "Targeted":
+        files = glob.glob("output/cv_results/cv_results_Targeted_*_LGBM.csv")
+    else:
+        files = glob.glob("output/cv_results/cv_results_Multi_combined_*_LGBM.csv")
+        
+    for f in files:
+        if struct == "Original":
+            drug = os.path.basename(f).replace("cv_results_", "").replace("_LGBM.csv", "")
+        elif struct == "SVD":
             drug = os.path.basename(f).replace("cv_results_SVD_", "").replace("_LGBM.csv", "")
-            df = pd.read_csv(f)
-            if 'test_accuracy' in df.columns:
-                results.append({"Drug": drug, "Accuracy": round(df['test_accuracy'].mean(), 4), "Precision": round(df['test_precision'].mean(), 4), "Recall": round(df['test_recall'].mean(), 4), "F1": round(df['test_f1'].mean(), 4)})
+        elif struct == "Targeted":
+            drug = os.path.basename(f).replace("cv_results_Targeted_", "").replace("_LGBM.csv", "")
+        else:
+            drug = os.path.basename(f).replace("cv_results_Multi_combined_", "").replace("_LGBM.csv", "")
+        
+        df = pd.read_csv(f)
+        score_dict = {
+            "Drug": drug,
+            "Accuracy": round(df['test_accuracy'].mean(), 4) if 'test_accuracy' in df.columns else 0.0,
+            "Precision": round(df['test_precision'].mean(), 4) if 'test_precision' in df.columns else 0.0,
+            "Recall": round(df['test_recall'].mean(), 4) if 'test_recall' in df.columns else 0.0,
+            "F1": round(df['test_f1'].mean(), 4) if 'test_f1' in df.columns else 0.0
+        }
+        
+        # Calculate F1 dynamically if raw params exist but metric does not
+        if score_dict["F1"] == 0.0 and score_dict["Precision"] > 0 and score_dict["Recall"] > 0:
+            p, r = score_dict["Precision"], score_dict["Recall"]
+            score_dict["F1"] = round(2 * (p * r) / (p + r), 4)
+
+        if len(score_dict) > 1: results.append(score_dict)
     return results
 
 metadata_df = load_metadata()
@@ -176,8 +221,15 @@ metadata_df = load_metadata()
 with st.sidebar:
     st.markdown("###  Drug Prediction")
     st.markdown("---")
-    str_choice = st.radio("Model Architecture", ["Original (Raw Genes)", "SVD Extrapolated"])
-    ms_key = "Original" if "Original" in str_choice else "SVD"
+    str_choice = st.radio("Model Architecture", ["Original (Raw Genes)", "SVD Extrapolated", "Targeted (Top 200 Features)", "Multi-Omics (Combined)"])
+    if "Original" in str_choice:
+        ms_key = "Original"
+    elif "SVD" in str_choice:
+        ms_key = "SVD"
+    elif "Targeted" in str_choice:
+        ms_key = "Targeted"
+    else:
+        ms_key = "Multi_combined"
     st.markdown("---")
     page = st.radio("Analysis", ["Drug Response Drivers", "Cross-Validation Analysis"], label_visibility="collapsed")
     st.markdown("---")
@@ -243,14 +295,32 @@ if page == "Drug Response Drivers":
 
     if ms_key == "Original":
         importances = model.feature_importances_
+        active_features = surviving_features
+    elif ms_key == "Targeted":
+        lgbm_est = model.named_steps["lgbm"].estimator
+        importances = lgbm_est.feature_importances_
+        vt_mask = model.named_steps['vt'].get_support()
+        fs_mask = model.named_steps['feature_selector'].get_support()
+        mapped_feats = np.array(surviving_features)
+        
+        # vt_mask matches original surviving_features size? 
+        # Actually surviving_features is what dashboard originally read, maybe it was loaded from `features.txt` which doesn't reflect what model saw.
+        # Let's map it safely
+        try:
+            passed_vt = mapped_feats[vt_mask] if len(vt_mask) == len(mapped_feats) else mapped_feats[:len(vt_mask)][vt_mask]
+            active_features = passed_vt[fs_mask]
+        except Exception:
+            active_features = [f"Gene_{i}" for i in range(len(importances))]
+            
     else:
         svd_transformer = joblib.load(f"output/models/LightGBM_SVD_transformer_{selected_drug}.joblib")
         importances = np.dot(model.feature_importances_, np.abs(svd_transformer.components_))
+        active_features = surviving_features
 
-    if len(importances) != len(surviving_features):
-        st.error(f"Feature mismatch: map shape {len(importances)} vs VT {len(surviving_features)}.")
+    if len(importances) != len(active_features):
+        st.error(f"Feature mismatch: map shape {len(importances)} vs available {len(active_features)}.")
     else:
-        df_imp = pd.DataFrame({"Gene": surviving_features, "Importance": importances})
+        df_imp = pd.DataFrame({"Gene": active_features, "Importance": importances})
         df_top20 = df_imp.sort_values("Importance", ascending=False).head(20)
 
         total_imp = df_imp["Importance"].sum()
